@@ -21,6 +21,7 @@ import {
   ATTR_MESSAGING_SYSTEM,
   ATTR_SERVER_ADDRESS,
   ATTR_SERVER_PORT,
+  MESSAGING_OPERATION_TYPE_VALUE_PROCESS,
   MESSAGING_OPERATION_TYPE_VALUE_SEND,
   MESSAGING_SYSTEM_VALUE_KAFKA
 } from '@opentelemetry/semantic-conventions/incubating'
@@ -71,8 +72,8 @@ function noop () {}
 export class KafkaInstrumentation extends InstrumentationBase<Config> {
   [kInitialized]: boolean = false
   #subscriptions: Record<string, TracingChannelSubscribers<object>>
-  #consumedMessagesHistogram!: Counter
-  #sentMessagesHistogram!: Counter
+  #consumedMessagesCounter!: Counter
+  #sentMessagesCounter!: Counter
   #clientDurationHistogram!: Histogram
   #processDurationHistogram!: Histogram
   #producedKeySerializer: KeySerializer
@@ -111,8 +112,8 @@ export class KafkaInstrumentation extends InstrumentationBase<Config> {
       return
     }
 
-    this.#consumedMessagesHistogram = this.meter.createCounter(metricConsumedMessagesName)
-    this.#sentMessagesHistogram = this.meter.createCounter(metricSentMessagesName)
+    this.#consumedMessagesCounter = this.meter.createCounter(metricConsumedMessagesName)
+    this.#sentMessagesCounter = this.meter.createCounter(metricSentMessagesName)
     this.#clientDurationHistogram = this.meter.createHistogram(metricClientOperationDurationName, {
       advice: { explicitBucketBoundaries: durationHistograms }
     })
@@ -215,7 +216,7 @@ export class KafkaInstrumentation extends InstrumentationBase<Config> {
 
     const spanAttributes: Record<string, string> = {
       ...ctx.attributes,
-      [ATTR_MESSAGING_OPERATION_TYPE]: MESSAGING_OPERATION_TYPE_VALUE_SEND
+      [ATTR_MESSAGING_OPERATION_TYPE]: MESSAGING_OPERATION_TYPE_VALUE_PROCESS
     }
 
     if (typeof key !== 'undefined') {
@@ -266,7 +267,7 @@ export class KafkaInstrumentation extends InstrumentationBase<Config> {
       [ATTR_ERROR_TYPE]: errorType
     })
 
-    this.#consumedMessagesHistogram!.add(1, { ...ctx.attributes, ...errorAttributes })
+    this.#consumedMessagesCounter!.add(1, { ...ctx.attributes, ...errorAttributes })
   }
 
   #onSendStart (ctx: SendContext): void {
@@ -344,7 +345,7 @@ export class KafkaInstrumentation extends InstrumentationBase<Config> {
         span.setStatus({ code: SpanStatusCode.OK })
       }
 
-      this.#sentMessagesHistogram!.add(1, { ...attributes, ...errorAttributes })
+      this.#sentMessagesCounter!.add(1, { ...attributes, ...errorAttributes })
 
       span.end()
     }
