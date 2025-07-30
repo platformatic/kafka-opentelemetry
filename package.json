@@ -27,6 +27,7 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.base.json",
+    "postbuild": "node scripts/postbuild.ts",
     "lint": "eslint --cache",
     "typecheck": "tsc -p . --noEmit",
     "format": "prettier -w benchmarks playground src test",
