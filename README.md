@@ -24,6 +24,7 @@ npm install @platformatic/kafka-opentelemetry
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node'
 import { registerInstrumentations } from '@opentelemetry/instrumentation'
 import { KafkaInstrumentation, processWithTracing } from '@platformatic/kafka-opentelemetry'
+import { forEach } from 'hwp'
 
 // Initialize OpenTelemetry
 const provider = new NodeTracerProvider()
@@ -76,6 +77,17 @@ stream.on('data', message => {
     }
   )
 })
+
+// 4. Concurrent message processing
+await forEach(
+  stream,
+  async message => {
+    return processWithTracing(message, async message => {
+      // Process the message here. Spans created in this function are children of the process span.
+    })
+  },
+  16
+) // 16 is the concurrency level
 ```
 
 ### Configuration Options
