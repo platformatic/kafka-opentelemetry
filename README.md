@@ -49,11 +49,33 @@ const consumer = new Consumer({
 
 const stream = await consumer.consume({ topics: ['my-topic'] })
 
+// 1. Sync message processing
+for await (const message of stream) {
+  processWithTracing(message, message => {
+    // Process the message here. Spans created in this function are children of the process span.
+    // If this function returns a promise and you don't await processWithTracing, then you'll process message in parallel.
+  })
+}
+
+// 2. Async message processing
 for await (const message of stream) {
   await processWithTracing(message, async message => {
     // Process the message here. Spans created in this function are children of the process span.
   })
 }
+
+// 3. Callback based message processing
+stream.on('data', message => {
+  processWithTracing(
+    message,
+    message => {
+      // Process the message here. Spans created in this function are children of the process span.
+    },
+    () => {
+      // Be notified when processing ends.
+    }
+  )
+})
 ```
 
 ### Configuration Options

@@ -12,43 +12,71 @@ import {
 
 export const consumerProcessesChannel = createTracingChannel<ProcessContext>('consumer:processes')
 
-export function processWithTracing (message: GenericMessage, processor: Processor, callback: Callback<void>): void
-export function processWithTracing (message: GenericMessage, processor: SyncProcessor | AsyncProcessor): Promise<void>
-export function processWithTracing (
-  message: GenericMessage,
-  processor: Processor,
+export function processWithTracing<T = GenericMessage> (
+  payload: T,
+  processor: Processor<T>,
+  callback: Callback<void>
+): void
+export function processWithTracing<T = GenericMessage> (
+  payload: T,
+  processor: SyncProcessor<T> | AsyncProcessor<T>
+): Promise<void>
+export function processWithTracing<T = GenericMessage> (
+  payload: T,
+  processor: Processor<T>,
   callback?: Callback<void>
 ): void | Promise<void> {
-  const ctx = createDiagnosticContext({ message }) as unknown as ProcessContext
+  const ctx = createDiagnosticContext({ message: payload }) as unknown as ProcessContext
+  consumerProcessesChannel.start.publish(ctx)
 
-  // The wrapping in the tracePromise is needed to allow throwing of sync functions
+  const activeContext = ctx.activeContext ?? context.active()
+
   if (callback) {
-    return consumerProcessesChannel.traceCallback(
-      (message, callback) => {
-        /* c8 ignore next - Else branch */
-        const activeContext = ctx.activeContext ?? context.active()
-        return context.with(activeContext, () => {
-          return (processor as CallbackProcessor)(message, callback)
+    const cbProcessor = processor as CallbackProcessor<T>
+
+    try {
+      context.with(activeContext, () => {
+        cbProcessor(payload, error => {
+          if (error) {
+            ctx.error = error
+          }
+
+          consumerProcessesChannel.asyncStart.publish(ctx)
+          callback(error)
         })
-      },
-      1,
-      ctx,
-      null,
-      message,
-      callback
-    )
+      })
+    } catch (error) {
+      ctx.error = error as Error
+      consumerProcessesChannel.asyncStart.publish(ctx)
+      callback(error as Error)
+    }
+
+    return
   }
 
-  return consumerProcessesChannel.tracePromise(
-    async message => {
-      /* c8 ignore next - Else branch */
-      const activeContext = ctx.activeContext ?? context.active()
-      return context.with(activeContext, () => {
-        return (processor as AsyncProcessor)(message)
-      })
-    },
-    ctx,
-    null,
-    message
-  )
+  try {
+    const result = context.with(activeContext, () => {
+      return (processor as SyncProcessor<T> | AsyncProcessor<T>)(payload)
+    })
+
+    if (typeof result?.then !== 'function') {
+      consumerProcessesChannel.asyncStart.publish(ctx)
+      return
+    }
+
+    return result.then(
+      () => {
+        consumerProcessesChannel.asyncStart.publish(ctx)
+      },
+      error => {
+        ctx.error = error
+        consumerProcessesChannel.asyncStart.publish(ctx)
+        throw error
+      }
+    )
+  } catch (error) {
+    ctx.error = error
+    consumerProcessesChannel.asyncStart.publish(ctx)
+    throw error
+  }
 }
