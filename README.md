@@ -4,7 +4,7 @@ OpenTelemetry instrumentation for [@platformatic/kafka](https://github.com/platf
 
 ## Features
 
-- **Automatic Tracing**: Comprehensive tracing for Kafka producers and consumers.
+- **Tracing**: Comprehensive tracing for Kafka producers and wrapped consumer processors.
 - **Semantic Conventions**: Follows OpenTelemetry semantic conventions for messaging systems.
 - **Zero Configuration**: Works out of the box with minimal setup.
 - **Performance Optimized**: Low-overhead instrumentation designed for production use.
@@ -23,7 +23,7 @@ npm install @platformatic/kafka-opentelemetry
 ```typescript
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node'
 import { registerInstrumentations } from '@opentelemetry/instrumentation'
-import { KafkaInstrumentation } from '@platformatic/kafka-opentelemetry'
+import { KafkaInstrumentation, processWithTracing } from '@platformatic/kafka-opentelemetry'
 
 // Initialize OpenTelemetry
 const provider = new NodeTracerProvider()
@@ -34,7 +34,6 @@ registerInstrumentations({
   instrumentations: [new KafkaInstrumentation()]
 })
 
-// Now use @platformatic/kafka as normal - traces will be automatically generated
 import { Producer, Consumer } from '@platformatic/kafka'
 
 const producer = new Producer({
@@ -47,6 +46,14 @@ const consumer = new Consumer({
   clientId: 'my-consumer',
   bootstrapBrokers: ['localhost:9092']
 })
+
+const stream = await consumer.consume({ topics: ['my-topic'] })
+
+for await (const message of stream) {
+  await processWithTracing(message, async message => {
+    // Process the message here. Spans created in this function are children of the process span.
+  })
+}
 ```
 
 ### Configuration Options

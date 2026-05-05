@@ -1,4 +1,4 @@
-import { SpanKind, SpanStatusCode } from '@opentelemetry/api'
+import { context, SpanKind, SpanStatusCode, trace } from '@opentelemetry/api'
 import {
   ATTR_ERROR_TYPE,
   ATTR_MESSAGING_DESTINATION_NAME,
@@ -372,6 +372,113 @@ test('should trace each consumed message (callback)', async t => {
     [ATTR_MESSAGING_DESTINATION_NAME]: topic,
     [ATTR_MESSAGING_DESTINATION_PARTITION_ID]: '0'
   })
+})
+
+test('should make the process span active in async handlers', async t => {
+  const consumer = await createConsumer(t, { deserializers: stringDeserializers })
+  const producer = await createProducer(t, { serializers: stringSerializers })
+  const topic = await createTopic(t, true)
+
+  let activeSpanId: string | undefined
+
+  const { traceExporter } = await runWithTracing(t, async () => {
+    const tracer = trace.getTracer('test-consumer-handler')
+
+    await producer.send({
+      messages: [
+        {
+          topic,
+          key: 'test-key',
+          value: 'test-value',
+          partition: 0
+        }
+      ]
+    })
+
+    const stream = await consumer.consume({ topics: [topic], mode: MessagesStreamModes.EARLIEST, maxWaitTime: 100 })
+    const { value: message } = await stream[Symbol.asyncIterator]().next()
+    ok(message)
+
+    await processWithTracing(message, async () => {
+      activeSpanId = trace.getSpan(context.active())?.spanContext().spanId
+
+      const span = tracer.startSpan('handler.manual-span')
+      span.end()
+    })
+  })
+
+  const spans = traceExporter.getFinishedSpans()
+  const producerSpan = spans.find(span => span.kind === SpanKind.PRODUCER)
+  const consumerSpan = spans.find(span => span.kind === SpanKind.CONSUMER)
+  const handlerSpan = spans.find(span => span.name === 'handler.manual-span')
+
+  ok(producerSpan)
+  ok(consumerSpan)
+  ok(handlerSpan)
+  deepStrictEqual(activeSpanId, consumerSpan.spanContext().spanId)
+  deepStrictEqual(handlerSpan.spanContext().traceId, consumerSpan.spanContext().traceId)
+  deepStrictEqual(handlerSpan.parentSpanContext?.spanId, consumerSpan.spanContext().spanId)
+  deepStrictEqual(consumerSpan.parentSpanContext?.spanId, producerSpan.spanContext().spanId)
+})
+
+test('should make the process span active in callback handlers', async t => {
+  const consumer = await createConsumer(t, { deserializers: stringDeserializers })
+  const producer = await createProducer(t, { serializers: stringSerializers })
+  const topic = await createTopic(t, true)
+
+  let activeSpanId: string | undefined
+
+  const { traceExporter } = await runWithTracing(t, async () => {
+    const tracer = trace.getTracer('test-consumer-callback-handler')
+
+    await producer.send({
+      messages: [
+        {
+          topic,
+          key: 'test-key',
+          value: 'test-value',
+          partition: 0
+        }
+      ]
+    })
+
+    const stream = await consumer.consume({ topics: [topic], mode: MessagesStreamModes.EARLIEST, maxWaitTime: 100 })
+    const { value: message } = await stream[Symbol.asyncIterator]().next()
+    ok(message)
+
+    await new Promise<void>((resolve, reject) => {
+      processWithTracing(
+        message,
+        (_, callback) => {
+          activeSpanId = trace.getSpan(context.active())?.spanContext().spanId
+
+          const span = tracer.startSpan('callback-handler.manual-span')
+          span.end()
+          callback()
+        },
+        error => {
+          if (error) {
+            reject(error)
+          } else {
+            resolve()
+          }
+        }
+      )
+    })
+  })
+
+  const spans = traceExporter.getFinishedSpans()
+  const producerSpan = spans.find(span => span.kind === SpanKind.PRODUCER)
+  const consumerSpan = spans.find(span => span.kind === SpanKind.CONSUMER)
+  const handlerSpan = spans.find(span => span.name === 'callback-handler.manual-span')
+
+  ok(producerSpan)
+  ok(consumerSpan)
+  ok(handlerSpan)
+  deepStrictEqual(activeSpanId, consumerSpan.spanContext().spanId)
+  deepStrictEqual(handlerSpan.spanContext().traceId, consumerSpan.spanContext().traceId)
+  deepStrictEqual(handlerSpan.parentSpanContext?.spanId, consumerSpan.spanContext().spanId)
+  deepStrictEqual(consumerSpan.parentSpanContext?.spanId, producerSpan.spanContext().spanId)
 })
 
 test('should trace each failed processing (sync function)', async t => {

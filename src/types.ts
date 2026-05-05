@@ -1,4 +1,4 @@
-import { type Attributes, type Span } from '@opentelemetry/api'
+import { type Attributes, type Context, type Span } from '@opentelemetry/api'
 import { type InstrumentationConfig } from '@opentelemetry/instrumentation'
 import {
   type ClientDiagnosticEvent,
@@ -29,6 +29,7 @@ export interface ProcessContextProperties {
   message: GenericMessage
   startTime: bigint
   span: Span
+  activeContext?: Context
   attributes: Attributes
 }
 

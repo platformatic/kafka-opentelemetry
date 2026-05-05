@@ -1,3 +1,4 @@
+import { context } from '@opentelemetry/api'
 import { createDiagnosticContext, createTracingChannel } from '@platformatic/kafka'
 import {
   type AsyncProcessor,
@@ -21,7 +22,33 @@ export function processWithTracing (
   const ctx = createDiagnosticContext({ message }) as unknown as ProcessContext
 
   // The wrapping in the tracePromise is needed to allow throwing of sync functions
-  return callback
-    ? consumerProcessesChannel.traceCallback(processor as CallbackProcessor, 1, ctx, null, message, callback)
-    : consumerProcessesChannel.tracePromise(async message => (processor as AsyncProcessor)(message), ctx, null, message)
+  if (callback) {
+    return consumerProcessesChannel.traceCallback(
+      (message, callback) => {
+        /* c8 ignore next - Else branch */
+        const activeContext = ctx.activeContext ?? context.active()
+        return context.with(activeContext, () => {
+          return (processor as CallbackProcessor)(message, callback)
+        })
+      },
+      1,
+      ctx,
+      null,
+      message,
+      callback
+    )
+  }
+
+  return consumerProcessesChannel.tracePromise(
+    async message => {
+      /* c8 ignore next - Else branch */
+      const activeContext = ctx.activeContext ?? context.active()
+      return context.with(activeContext, () => {
+        return (processor as AsyncProcessor)(message)
+      })
+    },
+    ctx,
+    null,
+    message
+  )
 }
