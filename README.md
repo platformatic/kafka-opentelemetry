@@ -4,7 +4,7 @@ OpenTelemetry instrumentation for [@platformatic/kafka](https://github.com/platf
 
 ## Features
 
-- **Automatic Tracing**: Comprehensive tracing for Kafka producers and consumers.
+- **Tracing**: Comprehensive tracing for Kafka producers and wrapped consumer processors.
 - **Semantic Conventions**: Follows OpenTelemetry semantic conventions for messaging systems.
 - **Zero Configuration**: Works out of the box with minimal setup.
 - **Performance Optimized**: Low-overhead instrumentation designed for production use.
@@ -23,7 +23,8 @@ npm install @platformatic/kafka-opentelemetry
 ```typescript
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node'
 import { registerInstrumentations } from '@opentelemetry/instrumentation'
-import { KafkaInstrumentation } from '@platformatic/kafka-opentelemetry'
+import { KafkaInstrumentation, processWithTracing } from '@platformatic/kafka-opentelemetry'
+import { forEach } from 'hwp'
 
 // Initialize OpenTelemetry
 const provider = new NodeTracerProvider()
@@ -34,7 +35,6 @@ registerInstrumentations({
   instrumentations: [new KafkaInstrumentation()]
 })
 
-// Now use @platformatic/kafka as normal - traces will be automatically generated
 import { Producer, Consumer } from '@platformatic/kafka'
 
 const producer = new Producer({
@@ -47,6 +47,47 @@ const consumer = new Consumer({
   clientId: 'my-consumer',
   bootstrapBrokers: ['localhost:9092']
 })
+
+const stream = await consumer.consume({ topics: ['my-topic'] })
+
+// 1. Sync message processing
+for await (const message of stream) {
+  processWithTracing(message, message => {
+    // Process the message here. Spans created in this function are children of the process span.
+    // If this function returns a promise and you don't await processWithTracing, then you'll process message in parallel.
+  })
+}
+
+// 2. Async message processing
+for await (const message of stream) {
+  await processWithTracing(message, async message => {
+    // Process the message here. Spans created in this function are children of the process span.
+  })
+}
+
+// 3. Callback based message processing
+stream.on('data', message => {
+  processWithTracing(
+    message,
+    message => {
+      // Process the message here. Spans created in this function are children of the process span.
+    },
+    () => {
+      // Be notified when processing ends.
+    }
+  )
+})
+
+// 4. Concurrent message processing
+await forEach(
+  stream,
+  async message => {
+    return processWithTracing(message, async message => {
+      // Process the message here. Spans created in this function are children of the process span.
+    })
+  },
+  16
+) // 16 is the concurrency level
 ```
 
 ### Configuration Options

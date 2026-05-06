@@ -233,6 +233,7 @@ export class KafkaInstrumentation extends InstrumentationBase<Config> {
       { kind: SpanKind.CONSUMER, attributes: spanAttributes },
       propagatedContext
     )
+    ctx.activeContext = trace.setSpan(propagatedContext, ctx.span)
 
     ctx.startTime = process.hrtime.bigint()
 

@@ -1,4 +1,4 @@
-import { type Attributes, type Span } from '@opentelemetry/api'
+import { type Attributes, type Context, type Span } from '@opentelemetry/api'
 import { type InstrumentationConfig } from '@opentelemetry/instrumentation'
 import {
   type ClientDiagnosticEvent,
@@ -17,18 +17,20 @@ export type GenericMessage = Message<unknown, unknown, unknown, unknown>
 
 export type Callback<ReturnType> = (error?: Error | null, payload?: ReturnType) => void
 
-export type SyncProcessor = (message: GenericMessage) => void
-export type CallbackProcessor = (message: GenericMessage, callback: Callback<void>) => void
-export type AsyncProcessor = (message: GenericMessage) => Promise<void>
-export type Processor = SyncProcessor | CallbackProcessor | AsyncProcessor
+export type SyncProcessor<T = GenericMessage> = (payload: T) => void
+export type CallbackProcessor<T = GenericMessage> = (payload: T, callback: Callback<void>) => void
+export type AsyncProcessor<T = GenericMessage> = (payload: T) => Promise<void>
+export type Processor<T = GenericMessage> = SyncProcessor<T> | CallbackProcessor<T> | AsyncProcessor<T>
 
 export type KeySerializer = (key: unknown) => string
 export type Hook = (message: MessageToProduce<unknown, unknown, unknown, unknown> | GenericMessage, span: Span) => void
 
-export interface ProcessContextProperties {
-  message: GenericMessage
+export interface ProcessContextProperties<T = GenericMessage> {
+  // TODO: Rename to payload in the next major release
+  message: T
   startTime: bigint
   span: Span
+  activeContext?: Context
   attributes: Attributes
 }
 

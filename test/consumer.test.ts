@@ -1,4 +1,4 @@
-import { SpanKind, SpanStatusCode } from '@opentelemetry/api'
+import { context, SpanKind, SpanStatusCode, trace } from '@opentelemetry/api'
 import {
   ATTR_ERROR_TYPE,
   ATTR_MESSAGING_DESTINATION_NAME,
@@ -12,7 +12,7 @@ import {
   MESSAGING_SYSTEM_VALUE_KAFKA
 } from '@opentelemetry/semantic-conventions/incubating'
 import { AuthenticationError, MessagesStreamModes, stringDeserializers, stringSerializers } from '@platformatic/kafka'
-import { deepStrictEqual, ok, rejects } from 'node:assert'
+import { deepStrictEqual, ok, rejects, throws } from 'node:assert'
 import { test } from 'node:test'
 import { metricConsumedMessagesName } from '../src/attributes.ts'
 import { processWithTracing } from '../src/process.ts'
@@ -61,7 +61,7 @@ test('should trace each consumed message (sync function)', async t => {
 
     const stream = await consumer.consume({ topics: [topic], mode: MessagesStreamModes.EARLIEST, maxWaitTime: 100 })
     for await (const message of stream) {
-      await processWithTracing(message, () => {})
+      processWithTracing(message, () => {})
 
       if (i++ === 2) {
         break
@@ -374,6 +374,140 @@ test('should trace each consumed message (callback)', async t => {
   })
 })
 
+test('should make the process span active in async handlers', async t => {
+  const consumer = await createConsumer(t, { deserializers: stringDeserializers })
+  const producer = await createProducer(t, { serializers: stringSerializers })
+  const topic = await createTopic(t, true)
+
+  let activeSpanId: string | undefined
+
+  const { traceExporter } = await runWithTracing(t, async () => {
+    const tracer = trace.getTracer('test-consumer-handler')
+
+    await producer.send({
+      messages: [
+        {
+          topic,
+          key: 'test-key',
+          value: 'test-value',
+          partition: 0
+        }
+      ]
+    })
+
+    const stream = await consumer.consume({ topics: [topic], mode: MessagesStreamModes.EARLIEST, maxWaitTime: 100 })
+    const { value: message } = await stream[Symbol.asyncIterator]().next()
+    ok(message)
+
+    await processWithTracing(message, async () => {
+      activeSpanId = trace.getSpan(context.active())?.spanContext().spanId
+
+      const span = tracer.startSpan('handler.manual-span')
+      span.end()
+    })
+  })
+
+  const spans = traceExporter.getFinishedSpans()
+  const producerSpan = spans.find(span => span.kind === SpanKind.PRODUCER)
+  const consumerSpan = spans.find(span => span.kind === SpanKind.CONSUMER)
+  const handlerSpan = spans.find(span => span.name === 'handler.manual-span')
+
+  ok(producerSpan)
+  ok(consumerSpan)
+  ok(handlerSpan)
+  deepStrictEqual(activeSpanId, consumerSpan.spanContext().spanId)
+  deepStrictEqual(handlerSpan.spanContext().traceId, consumerSpan.spanContext().traceId)
+  deepStrictEqual(handlerSpan.parentSpanContext?.spanId, consumerSpan.spanContext().spanId)
+  deepStrictEqual(consumerSpan.parentSpanContext?.spanId, producerSpan.spanContext().spanId)
+})
+
+test('should make the process span active in callback handlers', async t => {
+  const consumer = await createConsumer(t, { deserializers: stringDeserializers })
+  const producer = await createProducer(t, { serializers: stringSerializers })
+  const topic = await createTopic(t, true)
+
+  let activeSpanId: string | undefined
+
+  const { traceExporter } = await runWithTracing(t, async () => {
+    const tracer = trace.getTracer('test-consumer-callback-handler')
+
+    await producer.send({
+      messages: [
+        {
+          topic,
+          key: 'test-key',
+          value: 'test-value',
+          partition: 0
+        }
+      ]
+    })
+
+    const stream = await consumer.consume({ topics: [topic], mode: MessagesStreamModes.EARLIEST, maxWaitTime: 100 })
+    const { value: message } = await stream[Symbol.asyncIterator]().next()
+    ok(message)
+
+    await new Promise<void>((resolve, reject) => {
+      processWithTracing(
+        message,
+        (_, callback) => {
+          activeSpanId = trace.getSpan(context.active())?.spanContext().spanId
+
+          const span = tracer.startSpan('callback-handler.manual-span')
+          span.end()
+          callback()
+        },
+        error => {
+          if (error) {
+            reject(error)
+          } else {
+            resolve()
+          }
+        }
+      )
+    })
+  })
+
+  const spans = traceExporter.getFinishedSpans()
+  const producerSpan = spans.find(span => span.kind === SpanKind.PRODUCER)
+  const consumerSpan = spans.find(span => span.kind === SpanKind.CONSUMER)
+  const handlerSpan = spans.find(span => span.name === 'callback-handler.manual-span')
+
+  ok(producerSpan)
+  ok(consumerSpan)
+  ok(handlerSpan)
+  deepStrictEqual(activeSpanId, consumerSpan.spanContext().spanId)
+  deepStrictEqual(handlerSpan.spanContext().traceId, consumerSpan.spanContext().traceId)
+  deepStrictEqual(handlerSpan.parentSpanContext?.spanId, consumerSpan.spanContext().spanId)
+  deepStrictEqual(consumerSpan.parentSpanContext?.spanId, producerSpan.spanContext().spanId)
+})
+
+test('should pass sync callback processor errors to the callback', async () => {
+  const error = new Error('KABOOM!')
+
+  await new Promise<void>((resolve, reject) => {
+    processWithTracing(
+      {
+        topic: 'test-topic',
+        partition: 0,
+        key: 'test-key',
+        value: 'test-value',
+        headers: {}
+      },
+      () => {
+        throw error
+      },
+      actualError => {
+        try {
+          deepStrictEqual(actualError, error)
+          resolve()
+        } catch (assertionError) {
+          reject(assertionError)
+        }
+      }
+    )
+  })
+})
+
 test('should trace each failed processing (sync function)', async t => {
   const consumer = await createConsumer(t, { deserializers: stringDeserializers })
   const producer = await createProducer(t, { serializers: stringSerializers })
@@ -416,8 +550,8 @@ test('should trace each failed processing (sync function)', async t => {
 
     const stream = await consumer.consume({ topics: [topic], mode: MessagesStreamModes.EARLIEST, maxWaitTime: 100 })
     for await (const message of stream) {
-      await rejects(() => {
-        return processWithTracing(message, () => {
+      throws(() => {
+        processWithTracing(message, () => {
           throw i === 0 ? new AuthenticationError('KABOOM!') : new Error('KABOOM!')
         })
       })
