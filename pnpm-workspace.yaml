@@ -1,3 +1,6 @@
+allowBuilds:
+  protobufjs: true
+  unrs-resolver: true
 onlyBuiltDependencies:
   - protobufjs
   - unrs-resolver
