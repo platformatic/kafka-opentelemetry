@@ -148,7 +148,7 @@ test('should trace each failed produce', async t => {
     [ATTR_MESSAGING_DESTINATION_PARTITION_ID]: '0',
     [ATTR_MESSAGING_KAFKA_MESSAGE_KEY]: 'test-key1',
     [ATTR_MESSAGING_OPERATION_TYPE]: MESSAGING_OPERATION_TYPE_VALUE_SEND,
-    [ATTR_ERROR_TYPE]: 'PLT_KFK_RESPONSE'
+    [ATTR_ERROR_TYPE]: 'PLT_KFK_USER'
   })
 
   deepStrictEqual(producerSpans[1].kind, SpanKind.PRODUCER)
@@ -162,7 +162,7 @@ test('should trace each failed produce', async t => {
     [ATTR_MESSAGING_KAFKA_MESSAGE_KEY]: 'test-key2',
     [ATTR_MESSAGING_OPERATION_TYPE]: MESSAGING_OPERATION_TYPE_VALUE_SEND,
     [ATTR_MESSAGING_KAFKA_MESSAGE_TOMBSTONE]: 'true',
-    [ATTR_ERROR_TYPE]: 'PLT_KFK_RESPONSE'
+    [ATTR_ERROR_TYPE]: 'PLT_KFK_USER'
   })
 
   const metrics = metricsExporter.getMetrics()
@@ -174,9 +174,9 @@ test('should trace each failed produce', async t => {
 
   deepStrictEqual(sentMessages?.dataPoints.length, 2)
   deepStrictEqual(sentMessages?.dataPoints[0].value, 1)
-  deepStrictEqual(sentMessages?.dataPoints[0].attributes[ATTR_ERROR_TYPE], 'PLT_KFK_RESPONSE')
+  deepStrictEqual(sentMessages?.dataPoints[0].attributes[ATTR_ERROR_TYPE], 'PLT_KFK_USER')
   deepStrictEqual(sentMessages?.dataPoints[1].value, 1)
-  deepStrictEqual(sentMessages?.dataPoints[1].attributes[ATTR_ERROR_TYPE], 'PLT_KFK_RESPONSE')
+  deepStrictEqual(sentMessages?.dataPoints[1].attributes[ATTR_ERROR_TYPE], 'PLT_KFK_USER')
 })
 
 test('should allow customization via hooks', async t => {
